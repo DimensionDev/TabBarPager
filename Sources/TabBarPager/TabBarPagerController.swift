@@ -258,7 +258,7 @@ extension TabBarPagerController: TabBarPageViewDelegate {
         updatePageObservation()
         
         // set content offset
-        relayScrollView.contentOffset.y = contentOffsets[index] ?? containerScrollView.contentOffset.y
+        relayScrollView.contentOffset.y = contentOffsets[index] ?? 0
     }
 }
 
