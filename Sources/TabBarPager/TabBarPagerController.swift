@@ -225,7 +225,7 @@ extension TabBarPagerController: UIScrollViewDelegate {
 
             contentOffsets[currentPageIndex] = scrollView.contentOffset.y
             
-            let topMaxContentOffsetY = headerViewController.view.frame.maxY - containerScrollView.safeAreaInsets.top
+            let topMaxContentOffsetY = max(0, headerViewController.view.frame.maxY - containerScrollView.safeAreaInsets.top)
             if scrollView.contentOffset.y < topMaxContentOffsetY {
                 containerScrollView.contentOffset.y = scrollView.contentOffset.y
                 delegate?.resetPageContentOffset(self)
