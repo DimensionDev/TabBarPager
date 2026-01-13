@@ -84,9 +84,10 @@ extension TabBarPagerController {
 
         updatePageObservation()
 
-        // Force sync scroll positions after layout is complete
-        // This ensures correct positioning when returning from detail view
-        syncScrollPositionsIfNeeded()
+        // Sync scroll positions after a small delay to ensure layout is complete
+        DispatchQueue.main.async { [weak self] in
+            self?.syncScrollPositionsIfNeeded()
+        }
     }
 
     private func syncScrollPositionsIfNeeded() {
@@ -100,7 +101,14 @@ extension TabBarPagerController {
         guard headerViewController.view.frame.height > 0 else { return }
 
         let relayOffset = relayScrollView.contentOffset.y
-        let topMaxContentOffsetY = max(0, headerViewController.view.frame.maxY - containerScrollView.safeAreaInsets.top)
+        let containerOffset = containerScrollView.contentOffset.y
+        let pageOffset = currentPage.pageScrollView.contentOffset.y
+        let topMaxContentOffsetY = headerViewController.view.frame.maxY - containerScrollView.safeAreaInsets.top
+
+        // Skip if at or very close to top (initial position, with tolerance for floating point errors)
+        if abs(relayOffset) < 1.0 && abs(containerOffset) < 1.0 && abs(pageOffset) < 1.0 {
+            return
+        }
 
         // Calculate correct positions
         let correctContainerOffset: CGFloat
@@ -114,9 +122,11 @@ extension TabBarPagerController {
             correctPageOffset = relayOffset - topMaxContentOffsetY
         }
 
-        // Only update if there's a mismatch (to avoid unnecessary updates)
-        if abs(containerScrollView.contentOffset.y - correctContainerOffset) > 0.5 ||
-           abs(currentPage.pageScrollView.contentOffset.y - correctPageOffset) > 0.5 {
+        // Only update if there's a significant mismatch (tolerance: 1pt)
+        let containerDiff = abs(containerOffset - correctContainerOffset)
+        let pageDiff = abs(pageOffset - correctPageOffset)
+
+        if containerDiff > 1.0 || pageDiff > 1.0 {
             containerScrollView.contentOffset.y = correctContainerOffset
             currentPage.pageScrollView.contentOffset.y = correctPageOffset
         }
@@ -264,20 +274,11 @@ extension TabBarPagerController: UIScrollViewDelegate {
 
             let topMaxContentOffsetY = headerViewController.view.frame.maxY - containerScrollView.safeAreaInsets.top
             if scrollView.contentOffset.y < topMaxContentOffsetY {
-                if scrollView.isDragging {
-                    containerScrollView.contentOffset.y = scrollView.contentOffset.y
-                } else {
-                    containerScrollView.contentOffset.y = max( 0, scrollView.contentOffset.y)
-                }
+                containerScrollView.contentOffset.y = scrollView.contentOffset.y
                 delegate?.resetPageContentOffset(self)
                 contentOffsets.removeAll()
             } else {
-                if scrollView.isDragging {
-                    containerScrollView.contentOffset.y = topMaxContentOffsetY
-                } else {
-                    containerScrollView.contentOffset.y = max(0, topMaxContentOffsetY)
-                }
-                
+                containerScrollView.contentOffset.y = topMaxContentOffsetY
                 if let page = pageViewController.currentPage {
                     let contentOffsetY = scrollView.contentOffset.y - topMaxContentOffsetY
                     page.pageScrollView.contentOffset.y = contentOffsetY
@@ -303,34 +304,8 @@ extension TabBarPagerController: TabBarPageViewDelegate {
         // observe new page
         updatePageObservation()
 
-        // Get the target scroll offset
-        let targetOffset = contentOffsets[index] ?? containerScrollView.contentOffset.y
-
-        // Manually sync scroll positions to ensure all scrollViews are in correct state
-        guard let dataSource = self.dataSource else { return }
-        let headerViewController = dataSource.headerViewController()
-
-        // Ensure layout is complete before calculating
-        guard headerViewController.view.frame.height > 0 else {
-            // Layout not ready, just set relayScrollView and let scrollViewDidScroll handle sync later
-            relayScrollView.contentOffset.y = targetOffset
-            return
-        }
-
-        let topMaxContentOffsetY = headerViewController.view.frame.maxY - containerScrollView.safeAreaInsets.top
-
-        if targetOffset < topMaxContentOffsetY {
-            // In header scrolling area
-            containerScrollView.contentOffset.y = targetOffset
-            page.pageScrollView.contentOffset.y = 0
-        } else {
-            // Header is collapsed
-            containerScrollView.contentOffset.y = topMaxContentOffsetY
-            page.pageScrollView.contentOffset.y = targetOffset - topMaxContentOffsetY
-        }
-
-        // Set relayScrollView last
-        relayScrollView.contentOffset.y = targetOffset
+        // set content offset
+        relayScrollView.contentOffset.y = contentOffsets[index] ?? containerScrollView.contentOffset.y
     }
 }
 
