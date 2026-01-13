@@ -79,25 +79,6 @@ extension TabBarPagerController {
         relayScrollView.delegate = self
     }
     
-    public override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-
-        // Fix abnormal negative contentOffset that iOS may set when returning from detail view
-        // This happens when header height changes between navigations
-        // Normal bounce is around -10, so we only fix significantly negative values
-        if relayScrollView.contentOffset.y < -50 {
-            guard let dataSource = self.dataSource else { return }
-            let pageViewController = dataSource.pageViewController()
-            guard let currentPageIndex = pageViewController.currentPageIndex else { return }
-
-            // Get the saved offset, or use 0 if none
-            let savedOffset = contentOffsets[currentPageIndex] ?? 0
-
-            // Restore to saved position (ensuring it's non-negative)
-            relayScrollView.contentOffset.y = max(0, savedOffset)
-        }
-    }
-
     public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
@@ -276,8 +257,29 @@ extension TabBarPagerController: TabBarPageViewDelegate {
         // observe new page
         updatePageObservation()
 
-        // set content offset
-        relayScrollView.contentOffset.y = contentOffsets[index] ?? containerScrollView.contentOffset.y
+        // Get target offset
+        let targetOffset = contentOffsets[index] ?? containerScrollView.contentOffset.y
+
+        // Fix iOS bug: When returning from detail view with header height changes,
+        // iOS may set relayScrollView to negative value to compensate, but doesn't sync other scrollViews
+        // If we detect inconsistent state (relay is negative but target is positive),
+        // reset all scrollViews to consistent state first, then restore to target position
+        if relayScrollView.contentOffset.y < 0 && targetOffset >= 0 {
+            // Temporarily disable delegate to prevent triggering scrollViewDidScroll during reset
+            let originalDelegate = relayScrollView.delegate
+            relayScrollView.delegate = nil
+
+            // Reset all scrollViews to consistent initial state
+            relayScrollView.contentOffset.y = 0
+            containerScrollView.contentOffset.y = 0
+            page.pageScrollView.contentOffset.y = 0
+
+            // Re-enable delegate
+            relayScrollView.delegate = originalDelegate
+        }
+
+        // Now set the target offset (this will trigger scrollViewDidScroll to sync all scrollViews)
+        relayScrollView.contentOffset.y = targetOffset
     }
 }
 
