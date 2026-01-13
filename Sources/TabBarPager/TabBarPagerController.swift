@@ -79,6 +79,34 @@ extension TabBarPagerController {
         relayScrollView.delegate = self
     }
     
+    public override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+
+        // Fix abnormal negative contentOffset caused by iOS restoration
+        // This happens when header height changes between navigation
+        // Only fix if it's a significant negative value (not just bounce effect)
+        if relayScrollView.contentOffset.y < -10 {
+            guard let dataSource = self.dataSource else { return }
+            let pageViewController = dataSource.pageViewController()
+            guard let currentPageIndex = pageViewController.currentPageIndex else { return }
+
+            // Restore to saved position or 0 if no saved position
+            let savedOffset = contentOffsets[currentPageIndex] ?? 0
+            let correctOffset = max(0, savedOffset)
+
+            // Force reset all scroll positions to consistent state
+            relayScrollView.contentOffset.y = correctOffset
+            containerScrollView.contentOffset.y = 0
+
+            if let currentPage = pageViewController.currentPage {
+                currentPage.pageScrollView.contentOffset.y = 0
+            }
+
+            // Clear the saved offset to force recalculation
+            contentOffsets[currentPageIndex] = correctOffset
+        }
+    }
+
     public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
