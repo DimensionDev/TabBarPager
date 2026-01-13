@@ -79,85 +79,10 @@ extension TabBarPagerController {
         relayScrollView.delegate = self
     }
     
-    public override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-
-        // Fix abnormal negative contentOffset caused by iOS restoration
-        // This happens when header height changes between navigation
-        // Only fix if it's a significant negative value (not just bounce effect)
-        if relayScrollView.contentOffset.y < -10 {
-            guard let dataSource = self.dataSource else { return }
-            let pageViewController = dataSource.pageViewController()
-            guard let currentPageIndex = pageViewController.currentPageIndex else { return }
-
-            // Restore to saved position or 0 if no saved position
-            let savedOffset = contentOffsets[currentPageIndex] ?? 0
-            let correctOffset = max(0, savedOffset)
-
-            // Force reset all scroll positions to consistent state
-            relayScrollView.contentOffset.y = correctOffset
-            containerScrollView.contentOffset.y = 0
-
-            if let currentPage = pageViewController.currentPage {
-                currentPage.pageScrollView.contentOffset.y = 0
-            }
-
-            // Clear the saved offset to force recalculation
-            contentOffsets[currentPageIndex] = correctOffset
-        }
-    }
-
     public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
         updatePageObservation()
-
-        // Sync scroll positions after a small delay to ensure layout is complete
-        DispatchQueue.main.async { [weak self] in
-            self?.syncScrollPositionsIfNeeded()
-        }
-    }
-
-    private func syncScrollPositionsIfNeeded() {
-        guard let dataSource = self.dataSource else { return }
-        let headerViewController = dataSource.headerViewController()
-        let pageViewController = dataSource.pageViewController()
-        guard let currentPage = pageViewController.currentPage else { return }
-        guard let currentPageIndex = pageViewController.currentPageIndex else { return }
-
-        // Only sync if header layout is ready
-        guard headerViewController.view.frame.height > 0 else { return }
-
-        let relayOffset = relayScrollView.contentOffset.y
-        let containerOffset = containerScrollView.contentOffset.y
-        let pageOffset = currentPage.pageScrollView.contentOffset.y
-        let topMaxContentOffsetY = headerViewController.view.frame.maxY - containerScrollView.safeAreaInsets.top
-
-        // Skip if at or very close to top (initial position, with tolerance for floating point errors)
-        if abs(relayOffset) < 1.0 && abs(containerOffset) < 1.0 && abs(pageOffset) < 1.0 {
-            return
-        }
-
-        // Calculate correct positions
-        let correctContainerOffset: CGFloat
-        let correctPageOffset: CGFloat
-
-        if relayOffset < topMaxContentOffsetY {
-            correctContainerOffset = relayOffset
-            correctPageOffset = 0
-        } else {
-            correctContainerOffset = topMaxContentOffsetY
-            correctPageOffset = relayOffset - topMaxContentOffsetY
-        }
-
-        // Only update if there's a significant mismatch (tolerance: 1pt)
-        let containerDiff = abs(containerOffset - correctContainerOffset)
-        let pageDiff = abs(pageOffset - correctPageOffset)
-
-        if containerDiff > 1.0 || pageDiff > 1.0 {
-            containerScrollView.contentOffset.y = correctContainerOffset
-            currentPage.pageScrollView.contentOffset.y = correctPageOffset
-        }
     }
     
 }
@@ -298,17 +223,23 @@ extension TabBarPagerController: UIScrollViewDelegate {
                 delegate?.tabBarPagerController(self, didScroll: scrollView)
             }
 
-            contentOffsets[currentPageIndex] = scrollView.contentOffset.y
+            // Save contentOffset, but never save negative values (they are temporary bounce effects or iOS bugs)
+            contentOffsets[currentPageIndex] = max(0, scrollView.contentOffset.y)
 
             let topMaxContentOffsetY = headerViewController.view.frame.maxY - containerScrollView.safeAreaInsets.top
-            if scrollView.contentOffset.y < topMaxContentOffsetY {
-                containerScrollView.contentOffset.y = scrollView.contentOffset.y
+            let currentOffset = scrollView.contentOffset.y
+
+            if currentOffset < topMaxContentOffsetY {
+                // Allow small negative values for bounce effect, but prevent large negative values (iOS bugs)
+                // Normal bounce is typically -10 or less, so we use -50 as the threshold
+                let safeOffset = currentOffset < -50 ? 0 : currentOffset
+                containerScrollView.contentOffset.y = safeOffset
                 delegate?.resetPageContentOffset(self)
                 contentOffsets.removeAll()
             } else {
                 containerScrollView.contentOffset.y = topMaxContentOffsetY
                 if let page = pageViewController.currentPage {
-                    let contentOffsetY = scrollView.contentOffset.y - topMaxContentOffsetY
+                    let contentOffsetY = currentOffset - topMaxContentOffsetY
                     page.pageScrollView.contentOffset.y = contentOffsetY
                 }
             }
@@ -332,8 +263,12 @@ extension TabBarPagerController: TabBarPageViewDelegate {
         // observe new page
         updatePageObservation()
 
+        // Get target offset, ensuring it's not negative (fix iOS restoration bug)
+        let savedOffset = contentOffsets[index] ?? containerScrollView.contentOffset.y
+        let targetOffset = max(0, savedOffset)
+
         // set content offset
-        relayScrollView.contentOffset.y = contentOffsets[index] ?? containerScrollView.contentOffset.y
+        relayScrollView.contentOffset.y = targetOffset
     }
 }
 
