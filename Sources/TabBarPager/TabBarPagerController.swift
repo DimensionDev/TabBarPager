@@ -79,6 +79,25 @@ extension TabBarPagerController {
         relayScrollView.delegate = self
     }
     
+    public override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+
+        // Fix abnormal negative contentOffset that iOS may set when returning from detail view
+        // This happens when header height changes between navigations
+        // Normal bounce is around -10, so we only fix significantly negative values
+        if relayScrollView.contentOffset.y < -50 {
+            guard let dataSource = self.dataSource else { return }
+            let pageViewController = dataSource.pageViewController()
+            guard let currentPageIndex = pageViewController.currentPageIndex else { return }
+
+            // Get the saved offset, or use 0 if none
+            let savedOffset = contentOffsets[currentPageIndex] ?? 0
+
+            // Restore to saved position (ensuring it's non-negative)
+            relayScrollView.contentOffset.y = max(0, savedOffset)
+        }
+    }
+
     public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
@@ -223,23 +242,17 @@ extension TabBarPagerController: UIScrollViewDelegate {
                 delegate?.tabBarPagerController(self, didScroll: scrollView)
             }
 
-            // Save contentOffset, but never save negative values (they are temporary bounce effects or iOS bugs)
-            contentOffsets[currentPageIndex] = max(0, scrollView.contentOffset.y)
+            contentOffsets[currentPageIndex] = scrollView.contentOffset.y
 
             let topMaxContentOffsetY = headerViewController.view.frame.maxY - containerScrollView.safeAreaInsets.top
-            let currentOffset = scrollView.contentOffset.y
-
-            if currentOffset < topMaxContentOffsetY {
-                // Allow small negative values for bounce effect, but prevent large negative values (iOS bugs)
-                // Normal bounce is typically -10 or less, so we use -50 as the threshold
-                let safeOffset = currentOffset < -50 ? 0 : currentOffset
-                containerScrollView.contentOffset.y = safeOffset
+            if scrollView.contentOffset.y < topMaxContentOffsetY {
+                containerScrollView.contentOffset.y = scrollView.contentOffset.y
                 delegate?.resetPageContentOffset(self)
                 contentOffsets.removeAll()
             } else {
                 containerScrollView.contentOffset.y = topMaxContentOffsetY
                 if let page = pageViewController.currentPage {
-                    let contentOffsetY = currentOffset - topMaxContentOffsetY
+                    let contentOffsetY = scrollView.contentOffset.y - topMaxContentOffsetY
                     page.pageScrollView.contentOffset.y = contentOffsetY
                 }
             }
@@ -263,12 +276,8 @@ extension TabBarPagerController: TabBarPageViewDelegate {
         // observe new page
         updatePageObservation()
 
-        // Get target offset, ensuring it's not negative (fix iOS restoration bug)
-        let savedOffset = contentOffsets[index] ?? containerScrollView.contentOffset.y
-        let targetOffset = max(0, savedOffset)
-
         // set content offset
-        relayScrollView.contentOffset.y = targetOffset
+        relayScrollView.contentOffset.y = contentOffsets[index] ?? containerScrollView.contentOffset.y
     }
 }
 
