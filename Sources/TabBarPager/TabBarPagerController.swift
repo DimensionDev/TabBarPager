@@ -223,17 +223,29 @@ extension TabBarPagerController: UIScrollViewDelegate {
                 delegate?.tabBarPagerController(self, didScroll: scrollView)
             }
 
-            contentOffsets[currentPageIndex] = scrollView.contentOffset.y
+            let currentOffset = scrollView.contentOffset.y
+            contentOffsets[currentPageIndex] = currentOffset
 
             let topMaxContentOffsetY = headerViewController.view.frame.maxY - containerScrollView.safeAreaInsets.top
-            if scrollView.contentOffset.y < topMaxContentOffsetY {
-                containerScrollView.contentOffset.y = scrollView.contentOffset.y
+
+            if currentOffset < topMaxContentOffsetY {
+                // If offset is negative and user is NOT actively dragging/decelerating,
+                // it's an iOS bug (e.g., from navigation with header height changes)
+                // In this case, clamp to 0 to prevent white space at top
+                let safeOffset: CGFloat
+                if currentOffset < 0 && !scrollView.isDragging && !scrollView.isDecelerating {
+                    safeOffset = 0
+                } else {
+                    safeOffset = currentOffset
+                }
+
+                containerScrollView.contentOffset.y = safeOffset
                 delegate?.resetPageContentOffset(self)
                 contentOffsets.removeAll()
             } else {
                 containerScrollView.contentOffset.y = topMaxContentOffsetY
                 if let page = pageViewController.currentPage {
-                    let contentOffsetY = scrollView.contentOffset.y - topMaxContentOffsetY
+                    let contentOffsetY = currentOffset - topMaxContentOffsetY
                     page.pageScrollView.contentOffset.y = contentOffsetY
                 }
             }
@@ -257,29 +269,14 @@ extension TabBarPagerController: TabBarPageViewDelegate {
         // observe new page
         updatePageObservation()
 
-        // Get target offset
-        let targetOffset = contentOffsets[index] ?? containerScrollView.contentOffset.y
-
-        // Fix iOS bug: When returning from detail view with header height changes,
-        // iOS may set relayScrollView to negative value to compensate, but doesn't sync other scrollViews
-        // If we detect inconsistent state (relay is negative but target is positive),
-        // reset all scrollViews to consistent state first, then restore to target position
-        if relayScrollView.contentOffset.y < 0 && targetOffset >= 0 {
-            // Temporarily disable delegate to prevent triggering scrollViewDidScroll during reset
-            let originalDelegate = relayScrollView.delegate
-            relayScrollView.delegate = nil
-
-            // Reset all scrollViews to consistent initial state
+        // Fix: If relayScrollView is already at an abnormal negative value (iOS bug),
+        // reset it first to prevent white space
+        if relayScrollView.contentOffset.y < -10 {
             relayScrollView.contentOffset.y = 0
-            containerScrollView.contentOffset.y = 0
-            page.pageScrollView.contentOffset.y = 0
-
-            // Re-enable delegate
-            relayScrollView.delegate = originalDelegate
         }
 
-        // Now set the target offset (this will trigger scrollViewDidScroll to sync all scrollViews)
-        relayScrollView.contentOffset.y = targetOffset
+        // set content offset
+        relayScrollView.contentOffset.y = contentOffsets[index] ?? containerScrollView.contentOffset.y
     }
 }
 
